@@ -36,13 +36,6 @@ Clone the Repository:
 bash
 
 
-1
-2
-git clone https://github.com/your-username/your-repo-name.git
-cd your-repo-name
-(Recommended) Create a Virtual Environment:
-bash
-
 
 1
 2

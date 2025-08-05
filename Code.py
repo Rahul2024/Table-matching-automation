@@ -5,10 +5,11 @@ from openpyxl.styles import PatternFill
 from openpyxl.utils import get_column_letter
 from openpyxl import load_workbook
 
+
 # === Config ===
-file_path = "/Users/rahulraj/Desktop/billing23730.xlsx"
-key_columns = ['HASH_KEY']
-output_file = "/Users/rahulraj/Desktop/billing23730final2345.xlsx"
+file_path = "/Users/rahulraj/Downloads/SDS04_aggregate_testing_QA_5-11-56 (1).xlsx"
+key_columns = ['Company Code'	, 'Profit Center(Transaction Data)' , 	'Billing Document']
+output_file = "/Users/rahulraj/desktop/SDS04_aggregate_testing_result_QA_DEMO.xlsx"
 
 # === Load Sheets ===
 sheet1 = pd.read_excel(file_path, sheet_name='Sheet1')
@@ -35,14 +36,19 @@ def find_key_column(df_columns, target_key):
         return target_key
     if df_columns:
         match, score = process.extractOne(target_key, df_columns)
-        if score >= 80:
+        if score >= 90:
             print(f"⚠️ Warning: Using fuzzy match '{match}' for key column '{target_key}' (score: {score})")
             return match
     return None
 
 dupe_cols = sheet1.columns[sheet1.columns.duplicated()].tolist()
+
 if dupe_cols:
     print("❌ Duplicate columns in Sheet1:", dupe_cols)
+
+dupe_2cols = sheet2.columns[sheet2.columns.duplicated()].tolist()
+if dupe_2cols:
+    print("❌ Duplicate columns in Sheet2:", dupe_2cols)
 
 actual_key_columns = []
 for key in key_columns:
@@ -60,11 +66,28 @@ key_columns = actual_key_columns
 # === Store Original Key Values Before Processing ===
 original_keys_sheet1 = {key: sheet1[key].copy() for key in key_columns}
 
-# === Normalize Key Columns (Handle Leading Zeros) ===
+# === Fixed Normalize Key Columns (Handle Leading Zeros and Float Format) ===
 def normalize_key_value(val):
-    if pd.isna(val): return str(val)
+    """Normalize key values to clean string format without .0 suffix."""
+    if pd.isna(val): 
+        return str(val)
+    
+    # Convert to string first
     str_val = str(val).strip()
-    return str(int(str_val)) if str_val.isdigit() else str_val
+    
+    # Handle float format (remove .0 suffix)
+    if str_val.endswith('.0'):
+        str_val = str_val[:-2]
+    
+    # If it's a pure number, convert to int then back to string to remove leading zeros
+    if str_val.replace('.', '').replace('-', '').isdigit():
+        try:
+            # Convert to float first (in case of decimal), then to int, then to string
+            return str(int(float(str_val)))
+        except (ValueError, OverflowError):
+            return str_val
+    
+    return str_val
 
 for col in key_columns:
     sheet1[f'{col}_normalized'] = sheet1[col].apply(normalize_key_value)
@@ -92,7 +115,7 @@ sheet2_cols = [c for c in sheet2.columns if c not in key_columns and not c.endsw
 matched_cols, unmatched_cols = {}, []
 for col1 in sheet1_cols:
     match, score = process.extractOne(col1, sheet2_cols)
-    if score >= 93:   #changed the factor by 93 from 90 for better accuracy
+    if score >= 90:   #changed the factor by 93 from 90 for better accuracy
         matched_cols[col1] = match
     else:
         unmatched_cols.append(col1)
@@ -111,15 +134,48 @@ sheet1_comparison_result.insert(0, '__key__', composite_key_values)
 for key in reversed(key_columns):
     sheet1_comparison_result.insert(1, key, original_keys_sheet1[key])
 
-# --- Case-Insensitive Comparison Function ---
+# --- Enhanced Comparison Function ---
 def are_values_equal(v1, v2):
-    """Compares two values, ignoring case for strings."""
+    """Compares two values with special handling for empty-like values."""
+    
+    def is_empty_like(val):
+        """Check if a value is considered empty."""
+        # Handle pandas NaN/None (Excel blank cells)
+        if pd.isna(val) or val is None:
+            return True
+        
+        # Handle numeric zero
+        if isinstance(val, (int, float)) and val == 0:
+            return True
+            
+        # Handle string values
+        if isinstance(val, str):
+            cleaned = val.strip().lower()
+            if cleaned in ['', '*','0', '#', 'nan', 'null', 'none']:
+                return True
+        
+        return False
+    
+    # Check if both values are empty-like
+    if is_empty_like(v1) and is_empty_like(v2):
+        return True
+    
+    # If one is empty-like and the other isn't, they're not equal
+    if is_empty_like(v1) or is_empty_like(v2):
+        return False
+    
+    # Both values are non-empty, do normal comparison
     if pd.isna(v1) and pd.isna(v2):
         return True
     if pd.notna(v1) and pd.notna(v2):
-        if isinstance(v1, str) and isinstance(v2, str):
-            return v1.strip().lower() == v2.strip().lower()
-        return v1 == v2
+        # Try numeric comparison first
+        try:
+            return float(v1) == float(v2)
+        except (ValueError, TypeError):
+            # Fall back to string comparison (case insensitive)
+            if isinstance(v1, str) and isinstance(v2, str):
+                return v1.strip().lower() == v2.strip().lower()
+            return v1 == v2
     return False
 
 # === Build Comparison (True/False) Sheet ===
@@ -250,5 +306,8 @@ if "Mismatch Details" in wb.sheetnames:
                     cell.fill = red_fill
 
 wb.save(output_file)
-print(key_columns)
-print(f"✅ All done! Thank you Rahul '{output_file}'.")
+print("Key columns:", key_columns)
+print("Sample keys generated:")
+for i, key in enumerate(sheet1.index[:5]):  # Show first 5 keys as examples
+    print(f"  {key}")
+print(f"✅ All done! Results saved to '{output_file}'.")

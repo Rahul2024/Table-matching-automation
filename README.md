@@ -1,94 +1,108 @@
+**Excel Sheet Comparison & Reconciliation Tool**
 
-Excel Data Reconciliation Tool
-This Python script automates the comparison of two Excel sheets (Sheet1 and Sheet2) based on a specified key column. It performs fuzzy matching of column names, compares row values (handling data types like dates, integers, and strings), and generates a detailed Excel report highlighting matches, mismatches, and missing data.
+An automated Python script to intelligently compare two sheets within an Excel file. The tool identifies differences in data on a row-by-row and column-by-column basis, handling messy data, and generates a detailed, color-coded report highlighting all discrepancies.
 
-Features
-Automated Key Matching: Finds the specified key column (HASH_KEY by default) in both sheets, using fuzzy matching if an exact name match isn't found.
-Fuzzy Column Matching: Uses rapidfuzz to intelligently match column names between the two sheets, even if names are slightly different.
-Data Type Awareness:
-Automatically detects columns containing "Date" in their name.
-Converts numeric Excel serial dates (e.g., 44929) to proper Python date objects.
-Preserves integer and float data types.
-Ensures correct formatting (short date format like DD/MM/YYYY) in the output Excel file.
-Robust Comparisons:
-Case-insensitive string comparisons.
-Specific handling for date object comparisons.
-Handles leading zeros in key columns correctly.
-Comprehensive Output Report: Generates an Excel file with multiple sheets:
-Source Data: The original data from Sheet1.
-Target Data: The original data from Sheet2.
-Row Comparison: A boolean matrix indicating whether values in corresponding columns match (True) or not (False) for each row.
-Overall Result: A summary showing the status (match/mismatch/missing) and KPI (PASS/FAIL) for each column pair or unmatched column.
-Column Mapping: Details the fuzzy matching results between source and target columns.
-Side by Side Result: Displays data from both sheets side-by-side for easy visual comparison, including key columns and matched pairs.
-Mismatch Details: A filtered view showing only the rows and columns where mismatches were detected.
-Performance Optimizations: Employs vectorized Pandas operations and rapidfuzz for significantly faster execution compared to row-by-row loops. Avoids DataFrame fragmentation warnings.
-Clear Formatting: Applies color-coding (orange for keys, grey for target columns, green for PASS, red for FAIL/mismatches) and auto-fits column widths in the output Excel file.
-Prerequisites
-You need Python 3.x installed. The script requires the following Python libraries:
+It's designed to replace tedious manual VLOOKUPs and "diff" checks with a fast, accurate, and resilient automated process.
+
+✨ **Key Features**
+
+Intelligent Column Matching: Uses fuzzy string matching (fuzzywuzzy) to automatically pair up columns between the two sheets, even if the headers aren't identical (e.g., "Profit Center" vs. "Profit Center(Transaction Data)").
+
+Robust Key Normalization: Before comparing, it cleans and standardizes the key columns to ensure accurate matching. It handles:
+
+Leading/trailing whitespace.
+
+Numeric values stored as text (e.g., '00123' vs 123).
+
+Numbers with trailing .0 (e.g., 456.0 vs 456).
+
+Composite Key Support: Allows you to define multiple columns that together form a unique key for each row.
+
+Smart Value Comparison: The comparison logic is not a simple A == B. It intelligently treats various "empty-like" values as equivalent (e.g., 0, *, #, blank cells, None, NaN).
+
+Comprehensive Reporting: Generates a multi-sheet Excel workbook with a full breakdown of the comparison results.
+
+Visual Formatting: The output Excel file is beautifully color-coded for immediate visual feedback:
+
+🟢 Green for matching data and passed columns.
+
+🔴 Red for mismatches and failed columns.
+
+🟠 Orange for key columns.
+
+⚪ Grey for target columns in the side-by-side view.
+
+📋 **Output Explained**
+
+The script generates an Excel file with the following sheets, providing a 360-degree view of the comparison:
+
+Source Data: An exact copy of your first sheet, with the internal composite key added for reference.
+
+Target Data: An exact copy of your second sheet, with the internal composite key added for reference.
+
+Side by Side Result: A consolidated view showing data from the source sheet next to the corresponding data from the target sheet for every matched column.
+
+Mismatch Details: This is the most actionable sheet. It's a filtered version of the "Side by Side Result" that only shows rows containing at least one data mismatch. Furthermore, it only includes the key columns and the specific columns where the data did not match, highlighting the differing cells in red.
+
+Row Comparison: A technical boolean (TRUE/FALSE) report. Each cell indicates whether the value in that row and column matched its counterpart in the other sheet.
+
+Overall Result: A high-level summary report card. It lists every column and provides a PASS / FAIL status, showing which columns match perfectly and which have mismatches or are missing.
+
+Column Mapping: A transparency report showing how the script matched columns from the source sheet to the target sheet, including the fuzzy match score. It also lists columns that were present in one sheet but not the other.
+
+⚙️ **Setup and Usage**
+
+Follow these steps to get the tool running on your machine.
+
+1. Prerequisites
+Python 3.7 or newer.
+
+The pip package manager.
+
+2. Installation
+Clone this repository or download the script to your local machine.
+
+Navigate to the project directory in your terminal.
+
+Create a requirements.txt file with the following content:
 
 pandas
 numpy
-rapidfuzz
+fuzzywuzzy
+python-levenshtein
 openpyxl
-Installation
-Clone the Repository:
-bash
+Install the required Python libraries by running:
 
+Bash
 
+pip install -r requirements.txt
+Note: python-levenshtein is highly recommended as it significantly speeds up the fuzzy string matching process.
 
-1
-2
-python3 -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-Install Dependencies:
-bash
+3. Configuration
+Open the Python script in an editor and modify the === Config === section at the top:
 
+Python
 
-1
-pip install pandas numpy rapidfuzz openpyxl
-Configuration
-Before running the script, you need to configure the input file path and key column(s) in the script itself.
+# === Config ===
+# The full path to your input Excel file.
+file_path = "/path/to/your/input_data.xlsx"
 
-Open the Python script file (e.g., reconcile.py) in a text editor.
-Modify the file_path variable to point to your Excel workbook:
-python
+# The column headers that uniquely identify a row.
+# The script will try to find these using exact and fuzzy matching.
+key_columns = ['Company Code', 'Profit Center(Transaction Data)', 'Billing Document']
 
+# The full path where the output report will be saved.
+output_file = "/path/to/your/desktop/reconciliation_report.xlsx"
+file_path: Update this with the location of the Excel file you want to analyze. Your file should have two sheets, named Sheet1 and Sheet2 by default (or you can modify the pd.read_excel lines to match your sheet names).
 
-1
-file_path = "/path/to/your/input_file.xlsx"
-Modify the key_columns list if your key column has a different name:
-python
+key_columns: This is the most important setting. List the column names that together form a unique identifier for each row (a composite key).
 
+output_file: Specify the desired name and location for the generated report.
 
-1
-key_columns = ['YOUR_KEY_COLUMN_NAME'] # e.g., ['ID'], ['Order Number']
-(Optional) Change the output_file path if desired:
-python
+4. Run the Script
+Once configured, simply run the script from your terminal:
 
+Bash
 
-1
-output_file = "/path/to/your/output_file.xlsx"
-(Optional) Adjust the date format in the set_excel_column_types function:
-python
-
-
-1
-date_style.number_format = 'DD/MM/YYYY' # Change to 'MM/DD/YYYY', 'YYYY-MM-DD', etc.
-Usage
-Ensure you have configured the script as described above.
-
-Run the script from your terminal:
-
-bash
-
-
-1
-python reconcile.py
-The script will process the data and generate the output Excel file specified by output_file. Open this file to view the reconciliation results.
-
-Example
-Given an input file data.xlsx with sheets Sheet1 and Sheet2, and a key column ID, running the script will produce data_reconciled.xlsx containing the detailed comparison report across the seven sheets described in the Features section.
-
-Contributing
-Feel free to fork the repository and submit pull requests for improvements or bug fixes.
+python your_script_name.py
+You'll see progress messages in the console, and upon completion, the message ✅ All done! Results saved to '...' will appear. Your detailed, color-coded Excel report will be ready at the output path you specified.

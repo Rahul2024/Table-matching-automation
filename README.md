@@ -64,24 +64,18 @@ Clone this repository or download the script to your local machine.
 
 Navigate to the project directory in your terminal.
 
-Create a requirements.txt file with the following content:
+# Create virtual environment (optional but good practice)
+python -m venv myenv
 
-pandas
-numpy
-fuzzywuzzy
-python-levenshtein
-openpyxl
-Install the required Python libraries by running:
+# Activate it (Windows)
+myenv\Scripts\activate
 
-Bash
+# Activate it (Mac/Linux)
+source myenv/bin/activate
 
-pip install -r requirements.txt
-Note: python-levenshtein is highly recommended as it significantly speeds up the fuzzy string matching process.
+# Then install packages
+pip install pandas numpy fuzzywuzzy openpyxl python-levenshtein
 
-3. Configuration
-Open the Python script in an editor and modify the === Config === section at the top:
-
-Python
 
 # === Config ===
 # The full path to your input Excel file.

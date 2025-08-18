@@ -1,21 +1,27 @@
 import pandas as pd
 import numpy as np
-from fuzzywuzzy import process
+from fuzzywuzzy import process, fuzz
 from openpyxl.styles import PatternFill
 from openpyxl.utils import get_column_letter
 from openpyxl import load_workbook
 
 
 # === Config ===
-file_path = "/Users/rahulraj/Downloads/SDS04_aggregate_testing_QA_5-11-56 (1).xlsx"
-key_columns = ['Company Code'	, 'Profit Center(Transaction Data)' , 	'Billing Document']
-output_file = "/Users/rahulraj/desktop/SDS04_aggregate_testing_result_QA_DEMO.xlsx"
+file_path = "/Users/rahulraj/Desktop/automation demo/profit_center_5301.xlsx"
+key_columns = [	'Company Code' , 	'Profit Center' , 	'Billing Document']
+output_file = "/Users/rahulraj/Desktop/demo2.xlsx"
+
+
+
+# === FUZZY MATCHING SETTINGS ===
+MIN_FUZZY_SCORE = 85  # Increased from 92 for better matching
+EXACT_MATCH_BONUS = 10  # Bonus for exact substring matches
 
 # === Load Sheets ===
 sheet1 = pd.read_excel(file_path, sheet_name='Sheet1')
 sheet2 = pd.read_excel(file_path, sheet_name='Sheet2')
 
-# --- Improved Column Cleaning ---
+# ---Column Cleaning ---
 def clean_columns(df):
     """Clean column names more thoroughly."""
     cleaned_cols = []
@@ -29,60 +35,96 @@ def clean_columns(df):
 sheet1.columns = clean_columns(sheet1)
 sheet2.columns = clean_columns(sheet2)
 
-# === Improved Key Column Validation ===
-def find_key_column(df_columns, target_key):
-    """Find key column using exact match first, then fuzzy matching."""
+# === IMPROVED KEY COLUMN VALIDATION ===
+def find_key_column_improved(df_columns, target_key):
+    """Find key column using exact match first, then comprehensive fuzzy matching."""
+    # First try exact match
     if target_key in df_columns:
-        return target_key
-    if df_columns:
-        match, score = process.extractOne(target_key, df_columns)
-        if score >= 90:
-            print(f"⚠️ Warning: Using fuzzy match '{match}' for key column '{target_key}' (score: {score})")
-            return match
-    return None
+        return target_key, 100
+    
+    if not df_columns:
+        return None, 0
+    
+    # Try multiple fuzzy matching strategies
+    best_match = None
+    best_score = 0
+    
+    for col in df_columns:
+        # Strategy 1: Standard ratio
+        score1 = fuzz.ratio(target_key.lower(), col.lower())
+        
+        # Strategy 2: Partial ratio (good for substring matches)
+        score2 = fuzz.partial_ratio(target_key.lower(), col.lower())
+        
+        # Strategy 3: Token sort ratio (good for word order differences)
+        score3 = fuzz.token_sort_ratio(target_key.lower(), col.lower())
+        
+        # Strategy 4: Token set ratio (good for different word sets)
+        score4 = fuzz.token_set_ratio(target_key.lower(), col.lower())
+        
+        # Take the maximum score from all strategies
+        max_score = max(score1 ,  score2 , score3 , score4)
+        
+        # Bonus for exact substring matches
+        if target_key.lower() in col.lower() or col.lower() in target_key.lower():
+            max_score = min(100, max_score + EXACT_MATCH_BONUS)
+        
+        if max_score > best_score:
+            best_score = max_score
+            best_match = col
+    
+    return best_match, best_score
 
+# === DUPLICATE COLUMN CHECK ===
 dupe_cols = sheet1.columns[sheet1.columns.duplicated()].tolist()
-
 if dupe_cols:
     print("❌ Duplicate columns in Sheet1:", dupe_cols)
+    raise ValueError('❌ Duplicate columns in Sheet1 ❌')
 
 dupe_2cols = sheet2.columns[sheet2.columns.duplicated()].tolist()
 if dupe_2cols:
     print("❌ Duplicate columns in Sheet2:", dupe_2cols)
+    raise ValueError('❌ Duplicate columns in Sheet2 ❌')
 
+# === KEY COLUMN MATCHING ===
 actual_key_columns = []
 for key in key_columns:
-    found_key1 = find_key_column(sheet1.columns.tolist(), key)
-    found_key2 = find_key_column(sheet2.columns.tolist(), key)
-    if found_key1 and found_key2:
+    found_key1, score1 = find_key_column_improved(sheet1.columns.tolist(), key)
+    found_key2, score2 = find_key_column_improved(sheet2.columns.tolist(), key)
+    
+    if found_key1 and found_key2 and score1 >= MIN_FUZZY_SCORE and score2 >= MIN_FUZZY_SCORE:
         actual_key_columns.append(key)
-        if found_key1 != key: sheet1.rename(columns={found_key1: key}, inplace=True)
-        if found_key2 != key: sheet2.rename(columns={found_key2: key}, inplace=True)
+        if found_key1 != key: 
+            print(f"🔄 Renaming '{found_key1}' to '{key}' in Sheet1 (score: {score1})")
+            sheet1.rename(columns={found_key1: key}, inplace=True)
+        if found_key2 != key: 
+            print(f"🔄 Renaming '{found_key2}' to '{key}' in Sheet2 (score: {score2})")
+            sheet2.rename(columns={found_key2: key}, inplace=True)
     else:
         print(f"❌ Error: Key column '{key}' not found!")
+        print(f"   Sheet1 best match: '{found_key1}' (score: {score1})")
+        print(f"   Sheet2 best match: '{found_key2}' (score: {score2})")
         raise Exception(f"Missing key column: {key}")
+
 key_columns = actual_key_columns
 
 # === Store Original Key Values Before Processing ===
 original_keys_sheet1 = {key: sheet1[key].copy() for key in key_columns}
+original_keys_sheet2 = {key: sheet2[key].copy() for key in key_columns}
 
-# === Fixed Normalize Key Columns (Handle Leading Zeros and Float Format) ===
+# === Fixed Normalize Key Columns ===
 def normalize_key_value(val):
     """Normalize key values to clean string format without .0 suffix."""
     if pd.isna(val): 
         return str(val)
     
-    # Convert to string first
     str_val = str(val).strip()
     
-    # Handle float format (remove .0 suffix)
     if str_val.endswith('.0'):
         str_val = str_val[:-2]
     
-    # If it's a pure number, convert to int then back to string to remove leading zeros
     if str_val.replace('.', '').replace('-', '').isdigit():
         try:
-            # Convert to float first (in case of decimal), then to int, then to string
             return str(int(float(str_val)))
         except (ValueError, OverflowError):
             return str_val
@@ -103,96 +145,217 @@ if sheet1['__key__'].duplicated().any():
 if sheet2['__key__'].duplicated().any():
     sheet2['__key__'] += '_row' + (sheet2.index + 1).astype(str)
 
+# === NEW: Identify Common and Extra Rows ===
+sheet1_keys = set(sheet1['__key__'])
+sheet2_keys = set(sheet2['__key__'])
+
+# Find common keys and extra keys
+common_keys = sheet1_keys & sheet2_keys
+extra_in_sheet1 = sheet1_keys - sheet2_keys  # In Sheet1 but not in Sheet2
+extra_in_sheet2 = sheet2_keys - sheet1_keys  # In Sheet2 but not in Sheet1
+
+print(f"📊 Key Analysis:")
+print(f"  - Total keys in Sheet1: {len(sheet1_keys)}")
+print(f"  - Total keys in Sheet2: {len(sheet2_keys)}")
+print(f"  - Common keys (for comparison): {len(common_keys)}")
+print(f"  - Extra in Sheet1 only: {len(extra_in_sheet1)}")
+print(f"  - Extra in Sheet2 only: {len(extra_in_sheet2)}")
+
+# === Clean up normalized columns ===
+for col in normalized_key_cols:
+    if col in sheet1.columns:
+        sheet1.drop(columns=[col], inplace=True)
+    if col in sheet2.columns:
+        sheet2.drop(columns=[col], inplace=True)
+
 sheet1.set_index('__key__', inplace=True)
 sheet2.set_index('__key__', inplace=True)
 
-composite_key_values = sheet1.index.copy()
+# === NEW: Filter to Common Keys Only for Comparison ===
+sheet1_common = sheet1.loc[list(common_keys)]
+sheet2_common = sheet2.loc[list(common_keys)]
 
-# === Fuzzy Match Columns ===
-sheet1_cols = [c for c in sheet1.columns if c not in key_columns and not c.endswith('_normalized')]
-sheet2_cols = [c for c in sheet2.columns if c not in key_columns and not c.endswith('_normalized')]
+# === IMPROVED FUZZY MATCH COLUMNS ===
+sheet1_cols = [c for c in sheet1_common.columns if c not in key_columns]
+sheet2_cols = [c for c in sheet2_common.columns if c not in key_columns]
 
-matched_cols, unmatched_cols = {}, []
+def find_best_column_matches(source_cols, target_cols, min_score=MIN_FUZZY_SCORE):
+    """
+    Find the best fuzzy matches between two sets of columns using comprehensive matching.
+    Returns matched_cols dict and lists of unmatched columns.
+    """
+    print(f"\n🔍 Starting comprehensive column matching...")
+    print(f"   Source columns: {len(source_cols)}")
+    print(f"   Target columns: {len(target_cols)}")
+    print(f"   Minimum score threshold: {min_score}")
+    
+    # Calculate all possible matches with scores
+    all_matches = []
+    
+    for i, col1 in enumerate(source_cols):
+        for j, col2 in enumerate(target_cols):
+            # Use multiple fuzzy matching strategies
+            score1 = fuzz.ratio(col1.lower(), col2.lower())
+            score2 = fuzz.partial_ratio(col1.lower(), col2.lower())
+            score3 = fuzz.token_sort_ratio(col1.lower(), col2.lower())
+            score4 = fuzz.token_set_ratio(col1.lower(), col2.lower())
+            
+            # Take the maximum score
+            max_score = max(score1, score2, score3, score4)
+            
+            # Bonus for exact substring matches
+            if col1.lower() in col2.lower() or col2.lower() in col1.lower():
+                max_score = min(100, max_score + EXACT_MATCH_BONUS)
+            
+            if max_score >= min_score:
+                all_matches.append((col1, col2, max_score, i, j))
+    
+    # Sort by score (descending)
+    all_matches.sort(key=lambda x: x[2], reverse=True)
+    
+    print(f"   Found {len(all_matches)} potential matches above threshold")
+    
+    # Select best non-conflicting matches
+    used_source = set()
+    used_target = set()
+    matched_cols = {}
+    
+    for col1, col2, score, i, j in all_matches:
+        if col1 not in used_source and col2 not in used_target:
+            matched_cols[col1] = col2
+            used_source.add(col1)
+            used_target.add(col2)
+    
+    # Find unmatched columns
+    unmatched_source = [col for col in source_cols if col not in used_source]
+    unmatched_target = [col for col in target_cols if col not in used_target]
+    
+    print(f"\n📊 Matching Results:")
+    print(f"   ✅ Successfully matched: {len(matched_cols)} pairs")
+    print(f"   ❌ Unmatched in source: {len(unmatched_source)}")
+    print(f"   ❌ Unmatched in target: {len(unmatched_target)}")
+    
+    if unmatched_source:
+        print(f"   📝 Unmatched source columns: {unmatched_source}")
+    if unmatched_target:
+        print(f"   📝 Unmatched target columns: {unmatched_target}")
+    
+    return matched_cols, unmatched_source, unmatched_target
+
+# Use the improved matching function
+matched_cols, unmatched_cols, unmatched_sheet2 = find_best_column_matches(sheet1_cols, sheet2_cols)
+
+# === Build Side-by-side Sheet (Common Keys Only) ===
+sheet1_comparison_result = pd.DataFrame(index=sheet1_common.index)
 for col1 in sheet1_cols:
-    match, score = process.extractOne(col1, sheet2_cols)
-    if score >= 90:   #changed the factor by 93 from 90 for better accuracy
-        matched_cols[col1] = match
-    else:
-        unmatched_cols.append(col1)
-
-# === Build Side-by-side Sheet ===
-sheet1_comparison_result = pd.DataFrame(index=sheet1.index)
-for col1 in sheet1_cols:
-    sheet1_comparison_result[col1] = sheet1[col1]
+    sheet1_comparison_result[col1] = sheet1_common[col1]
     if col1 in matched_cols:
         col2 = matched_cols[col1]
-        sheet1_comparison_result[f"{col2} (target)"] = sheet2[col2].reindex(sheet1.index)
+        sheet1_comparison_result[f"{col2} (target)"] = sheet2_common[col2]
     else:
         sheet1_comparison_result[f"Missing (target)"] = "Missing in Target"
 
-sheet1_comparison_result.insert(0, '__key__', composite_key_values)
-for key in reversed(key_columns):
-    sheet1_comparison_result.insert(1, key, original_keys_sheet1[key])
+# Insert composite key
+sheet1_comparison_result.insert(0, '__key__', sheet1_comparison_result.index)
 
-# --- Enhanced Comparison Function ---
-def are_values_equal(v1, v2):
-    """Compares two values with special handling for empty-like values."""
+# Create mapping for original key values (common keys only)
+key_to_original_sheet1 = {}
+key_to_original_sheet2 = {}
+
+# Get original indices for common keys
+original_sheet1_indices = []
+original_sheet2_indices = []
+
+for comp_key in common_keys:
+    # Find original index in sheet1
+    orig_idx1 = sheet1.index.get_loc(comp_key)
+    original_sheet1_indices.append(orig_idx1)
+    key_to_original_sheet1[comp_key] = {key: original_keys_sheet1[key].iloc[orig_idx1] for key in key_columns}
     
-    def is_empty_like(val):
-        """Check if a value is considered empty."""
-        # Handle pandas NaN/None (Excel blank cells)
+    # Find original index in sheet2  
+    orig_idx2 = sheet2.index.get_loc(comp_key)
+    original_sheet2_indices.append(orig_idx2)
+    key_to_original_sheet2[comp_key] = {key: original_keys_sheet2[key].iloc[orig_idx2] for key in key_columns}
+
+# Insert original key columns
+for idx, key in enumerate(reversed(key_columns), 1):
+    original_values = [key_to_original_sheet1[comp_key][key] for comp_key in sheet1_comparison_result.index]
+    sheet1_comparison_result.insert(idx, key, original_values)
+
+def are_values_equal_enhanced(v1, v2):
+    """Enhanced comparison with more robust empty value handling."""
+    
+    def normalize_value(val):
+        """Normalize a value to a standard form for comparison."""
         if pd.isna(val) or val is None:
-            return True
+            return None
         
-        # Handle numeric zero
-        if isinstance(val, (int, float)) and val == 0:
-            return True
-            
+        # Handle numeric values
+        if isinstance(val, (int, float)):
+            if val == 0 or val == 0.0 or val== 0.00:
+                return 0
+            return val
+        
         # Handle string values
         if isinstance(val, str):
             cleaned = val.strip().lower()
-            if cleaned in ['', '*','0', '#', 'nan', 'null', 'none']:
-                return True
+            
+            # Check for various empty representations
+            if cleaned in ['', '0', '0.00','0.0', '#', 'nan', 'null', 'none', 'not assigned', '-']:
+                return None
+            
+            # Try to convert to number if it looks like one
+            try:
+                num_val = float(cleaned)
+                if num_val == 0.0:
+                    return 0
+                return num_val
+            except (ValueError, TypeError):
+                return cleaned
         
-        return False
-    
-    # Check if both values are empty-like
-    if is_empty_like(v1) and is_empty_like(v2):
-        return True
-    
-    # If one is empty-like and the other isn't, they're not equal
-    if is_empty_like(v1) or is_empty_like(v2):
-        return False
-    
-    # Both values are non-empty, do normal comparison
-    if pd.isna(v1) and pd.isna(v2):
-        return True
-    if pd.notna(v1) and pd.notna(v2):
-        # Try numeric comparison first
+        # Try to convert other types to string and normalize
+        str_val = str(val).strip().lower()
+        if str_val in ['', '0', '0.00'  , '0.0', 'nan', 'null', 'none', 'not assigned', '-']:
+            return None
+        
         try:
-            return float(v1) == float(v2)
+            num_val = float(str_val)
+            if num_val == 0.0:
+                return 0
+            return num_val
         except (ValueError, TypeError):
-            # Fall back to string comparison (case insensitive)
-            if isinstance(v1, str) and isinstance(v2, str):
-                return v1.strip().lower() == v2.strip().lower()
-            return v1 == v2
-    return False
+            return str_val
+    
+    # Normalize both values
+    norm_v1 = normalize_value(v1)
+    norm_v2 = normalize_value(v2)
+    
+    # Compare normalized values
+    if norm_v1 is None and norm_v2 is None:
+        return True
+    if norm_v1 is None or norm_v2 is None:
+        return False
+    if norm_v1 == 0 and norm_v2 == 0:
+        return True
+    
+    return norm_v1 == norm_v2
 
-# === Build Comparison (True/False) Sheet ===
-comparison = pd.DataFrame(index=sheet1.index)
+# === Build Comparison (Common Keys Only) ===
+comparison = pd.DataFrame(index=sheet1_common.index)
 for col1, col2 in matched_cols.items():
-    val1 = sheet1[col1]
-    val2 = sheet2[col2].reindex(sheet1.index)
-    comparison[col1] = [are_values_equal(val1.iloc[i], val2.iloc[i]) for i in range(len(val1))]
+    val1 = sheet1_common[col1]
+    val2 = sheet2_common[col2]
+    comparison[col1] = [are_values_equal_enhanced(val1.iloc[i], val2.iloc[i]) for i in range(len(val1))]
 
 for col1 in unmatched_cols:
     comparison[col1] = "Missing in Sheet2"
 
-# === Overall result Sheet (4th) ===
+# === Overall result Sheet ===
 column_status = []
-unmatched_sheet2 = set(sheet2_cols) - set(matched_cols.values())
-for col2 in unmatched_sheet2: column_status.append({'Column': col2, 'Status': 'Missing in Source', 'KPI': 'FAIL'})
-for col1 in unmatched_cols: column_status.append({'Column': col1, 'Status': 'Missing in Target', 'KPI': 'FAIL'})
+for col2 in unmatched_sheet2: 
+    column_status.append({'Column': col2, 'Status': 'Missing in Source', 'KPI': 'FAIL'})
+for col1 in unmatched_cols: 
+    column_status.append({'Column': col1, 'Status': 'Missing in Target', 'KPI': 'FAIL'})
 for col in matched_cols:
     if comparison[col].dtype == bool:
         if comparison[col].all():
@@ -202,36 +365,96 @@ for col in matched_cols:
             column_status.append({'Column': col, 'Status': f'Mismatches: {mismatch_count}/{len(comparison[col])}', 'KPI': 'FAIL'})
 column_status_df = pd.DataFrame(column_status)
 
-# === Column Mapping Sheet (5th)===
+# === Column Mapping Sheet ===
 column_comparison_data = []
-for col1, col2 in matched_cols.items(): column_comparison_data.append({'Source_Column': col1, 'Target_Column': col2, 'Match_Status': 'Matched', 'Fuzzy_Score': process.extractOne(col1, [col2])[1]})
-for col1 in unmatched_cols: column_comparison_data.append({'Source_Column': col1, 'Target_Column': 'Not Found', 'Match_Status': 'Missing in Target', 'Fuzzy_Score': 'N/A'})
-for col2 in unmatched_sheet2: column_comparison_data.append({'Source_Column': 'Not Found', 'Target_Column': col2, 'Match_Status': 'Missing in Source', 'Fuzzy_Score': 'N/A'})
+for col1, col2 in matched_cols.items(): 
+    # Recalculate the best score for display
+    score1 = fuzz.ratio(col1.lower(), col2.lower())
+    score2 = fuzz.partial_ratio(col1.lower(), col2.lower())
+    score3 = fuzz.token_sort_ratio(col1.lower(), col2.lower())
+    score4 = fuzz.token_set_ratio(col1.lower(), col2.lower())
+    best_score = max(score1, score2, score3, score4)
+    
+    if col1.lower() in col2.lower() or col2.lower() in col1.lower():
+        best_score = min(100, best_score + EXACT_MATCH_BONUS)
+    
+    column_comparison_data.append({'Source_Column': col1, 'Target_Column': col2, 'Match_Status': 'Matched', 'Fuzzy_Score': best_score})
+
+for col1 in unmatched_cols: 
+    column_comparison_data.append({'Source_Column': col1, 'Target_Column': 'Not Found', 'Match_Status': 'Missing in Target', 'Fuzzy_Score': 'N/A'})
+for col2 in unmatched_sheet2: 
+    column_comparison_data.append({'Source_Column': 'Not Found', 'Target_Column': col2, 'Match_Status': 'Missing in Source', 'Fuzzy_Score': 'N/A'})
 column_comparison_df = pd.DataFrame(column_comparison_data)
 
-# --- Create Mismatch Details DataFrame (Final Corrected Logic) ---
-# 1. Find rows with at least one mismatch
+# === Mismatch Details (Common Keys Only) ===
 mismatch_rows_mask = (comparison == False).any(axis=1)
 
-# 2. Get the list of columns with a 'FAIL' KPI from the "Overall Result" sheet
-failed_cols_df = column_status_df[column_status_df['KPI'] == 'FAIL']
-failed_source_cols = failed_cols_df['Column'].tolist()
+# NEW: Use Overall Result sheet to identify failed columns
+failed_columns = column_status_df[column_status_df['KPI'] == 'FAIL']['Column'].tolist()
 
-# 3. Build the final list of columns to show in the mismatch sheet
-# We always include the key columns for context
+# Build final mismatch columns list - only include failed columns
 final_mismatch_cols = ['__key__'] + key_columns
 
-# Add the source and corresponding target columns for the failed columns
-for col in failed_source_cols:
-    # Ensure the column is a data column, not one marked as missing in source
-    if col in matched_cols:
-        final_mismatch_cols.append(col)  # Add the source column
-        target_col = matched_cols[col]
-        final_mismatch_cols.append(f"{target_col} (target)") # Add the target column
+# Add only failed columns (both source and target versions)
+for col1 in failed_columns:
+    if col1 in sheet1_comparison_result.columns:
+        final_mismatch_cols.append(col1)
+        # Add corresponding target column if it exists
+        if col1 in matched_cols:
+            col2 = matched_cols[col1]
+            target_col_name = f"{col2} (target)"
+            if target_col_name in sheet1_comparison_result.columns:
+                final_mismatch_cols.append(target_col_name)
 
-# 4. Filter the side-by-side results for both mismatch rows and the failed columns
-mismatch_df = sheet1_comparison_result.loc[mismatch_rows_mask, final_mismatch_cols].copy()
+# Filter to only available columns
+available_cols = [col for col in final_mismatch_cols if col in sheet1_comparison_result.columns]
+mismatch_df = sheet1_comparison_result.loc[mismatch_rows_mask, available_cols].copy()
 
+# === NEW: Create Extra Rows Sheet ===
+extra_rows_data = []
+
+# Add extra rows from Sheet1 (Yellow)
+if extra_in_sheet1:
+    for key in extra_in_sheet1:
+        row_data = {'__key__': key, 'Source': 'Sheet1 Only'}
+        
+        # Add original key values
+        orig_idx = sheet1.index.get_loc(key)
+        for col in key_columns:
+            row_data[col] = original_keys_sheet1[col].iloc[orig_idx]
+        
+        # Add all other columns from sheet1
+        for col in sheet1.columns:
+            if col not in key_columns:
+                row_data[f'{col} (Sheet1)'] = sheet1.loc[key, col]
+        
+        extra_rows_data.append(row_data)
+
+# Add extra rows from Sheet2 (Blue)
+if extra_in_sheet2:
+    for key in extra_in_sheet2:
+        row_data = {'__key__': key, 'Source': 'Sheet2 Only'}
+        
+        # Add original key values
+        orig_idx = sheet2.index.get_loc(key)
+        for col in key_columns:
+            row_data[col] = original_keys_sheet2[col].iloc[orig_idx]
+        
+        # Add all other columns from sheet2
+        for col in sheet2.columns:
+            if col not in key_columns:
+                row_data[f'{col} (Sheet2)'] = sheet2.loc[key, col]
+        
+        extra_rows_data.append(row_data)
+
+# Create DataFrame for extra rows
+if extra_rows_data:
+    extra_rows_df = pd.DataFrame(extra_rows_data)
+    # Reorder columns to have key columns first
+    cols_order = ['__key__', 'Source'] + key_columns + [col for col in extra_rows_df.columns if col not in (['__key__', 'Source'] + key_columns)]
+    extra_rows_df = extra_rows_df.reindex(columns=cols_order)
+else:
+    extra_rows_df = pd.DataFrame()
 
 # === Write to Excel ===
 with pd.ExcelWriter(output_file, engine="openpyxl") as writer:
@@ -242,6 +465,7 @@ with pd.ExcelWriter(output_file, engine="openpyxl") as writer:
     column_comparison_df.to_excel(writer, sheet_name="Column Mapping", index=False)
     sheet1_comparison_result.reset_index(drop=True).to_excel(writer, sheet_name="Side by Side Result", index=False)
     mismatch_df.reset_index(drop=True).to_excel(writer, sheet_name="Mismatch Details", index=False)
+    extra_rows_df.to_excel(writer, sheet_name="Extra Rows Analysis", index=False)  # NEW SHEET
 
 # === Apply color formatting ===
 wb = load_workbook(output_file)
@@ -249,6 +473,8 @@ orange_fill = PatternFill(start_color="FFE4B5", end_color="FFE4B5", fill_type="s
 grey_fill = PatternFill(start_color="D9D9D9", end_color="D9D9D9", fill_type="solid")
 green_fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
 red_fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
+yellow_fill = PatternFill(start_color="FFFF99", end_color="FFFF99", fill_type="solid")  # Sheet1 extra rows
+blue_fill = PatternFill(start_color="ADD8E6", end_color="ADD8E6", fill_type="solid")    # Sheet2 extra rows
 
 def auto_fit_columns_simple(worksheet):
     for column_cells in worksheet.columns:
@@ -288,7 +514,7 @@ for row in ws_cm.iter_rows(min_row=2):
         for cell in row: cell.fill = fill
 
 # Color Mismatch Details Sheet
-if "Mismatch Details" in wb.sheetnames:
+if "Mismatch Details" in wb.sheetnames and len(mismatch_df) > 0:
     ws_md = wb["Mismatch Details"]
     headers = [cell.value for cell in ws_md[1]]
     
@@ -305,9 +531,37 @@ if "Mismatch Details" in wb.sheetnames:
                 if is_match == False:
                     cell.fill = red_fill
 
+# NEW: Color Extra Rows Analysis Sheet
+if "Extra Rows Analysis" in wb.sheetnames and len(extra_rows_df) > 0:
+    ws_era = wb["Extra Rows Analysis"]
+    
+    # Color header row (Source column in orange, key columns in orange)
+    for col_idx in range(1, ws_era.max_column + 1):
+        header = ws_era.cell(row=1, column=col_idx).value
+        if header in key_columns or header == '__key__' or header == 'Source':
+            ws_era.cell(row=1, column=col_idx).fill = orange_fill
+    
+    # Color data rows based on source
+    for row_num in range(2, ws_era.max_row + 1):
+        source_cell = ws_era.cell(row=row_num, column=2)  # 'Source' column
+        if source_cell.value == "Sheet1 Only":
+            fill = yellow_fill
+        elif source_cell.value == "Sheet2 Only":
+            fill = blue_fill
+        else:
+            continue
+            
+        # Apply color to entire row
+        for col_num in range(1, ws_era.max_column + 1):
+            ws_era.cell(row=row_num, column=col_num).fill = fill
+
 wb.save(output_file)
 print("Key columns:", key_columns)
-print("Sample keys generated:")
-for i, key in enumerate(sheet1.index[:5]):  # Show first 5 keys as examples
+print("Sample common keys:")
+for i, key in enumerate(list(common_keys)[:5]):
     print(f"  {key}")
-print(f"✅ All done! Results saved to '{output_file}'.")
+print(f"📊 Final Summary:")
+print(f"  - Common rows compared: {len(common_keys)}")
+print(f"  - Extra in Sheet1 (Yellow): {len(extra_in_sheet1)}")
+print(f"  - Extra in Sheet2 (Blue): {len(extra_in_sheet2)}")
+print(f"✨ Abracadabra! File magically appeared at '{output_file}' 🪄")

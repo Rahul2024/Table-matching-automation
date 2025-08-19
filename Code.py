@@ -7,9 +7,9 @@ from openpyxl import load_workbook
 
 
 # === Config ===
-file_path = "/Users/rahulraj/Desktop/automation demo/profit_center_5301.xlsx"
-key_columns = [	'Company Code' , 	'Profit Center' , 	'Billing Document']
-output_file = "/Users/rahulraj/Desktop/demo2.xlsx"
+file_path = "/Users/rahulraj/Desktop/sdso4_sap_attribute_headers.xlsx"
+key_columns = [	'Company Code'	 , 'Profit Center' , 	'Billing Document']
+output_file = "/Users/rahulraj/Desktop/sdso4_sap_attribute_final.xlsx"
 
 
 
@@ -175,75 +175,38 @@ sheet2.set_index('__key__', inplace=True)
 sheet1_common = sheet1.loc[list(common_keys)]
 sheet2_common = sheet2.loc[list(common_keys)]
 
-# === IMPROVED FUZZY MATCH COLUMNS ===
-sheet1_cols = [c for c in sheet1_common.columns if c not in key_columns]
-sheet2_cols = [c for c in sheet2_common.columns if c not in key_columns]
+# === IMPROVED FUZZY MATCH COLUMNS (UPDATED SECTION) ===
+# Only include actual data columns, exclude key columns and any remaining normalized columns
+sheet1_cols = [c for c in sheet1_common.columns if c not in key_columns and not c.endswith('_normalized')]
+sheet2_cols = [c for c in sheet2_common.columns if c not in key_columns and not c.endswith('_normalized')]
 
-def find_best_column_matches(source_cols, target_cols, min_score=MIN_FUZZY_SCORE):
-    """
-    Find the best fuzzy matches between two sets of columns using comprehensive matching.
-    Returns matched_cols dict and lists of unmatched columns.
-    """
-    print(f"\n🔍 Starting comprehensive column matching...")
-    print(f"   Source columns: {len(source_cols)}")
-    print(f"   Target columns: {len(target_cols)}")
-    print(f"   Minimum score threshold: {min_score}")
-    
-    # Calculate all possible matches with scores
-    all_matches = []
-    
-    for i, col1 in enumerate(source_cols):
-        for j, col2 in enumerate(target_cols):
-            # Use multiple fuzzy matching strategies
-            score1 = fuzz.ratio(col1.lower(), col2.lower())
-            score2 = fuzz.partial_ratio(col1.lower(), col2.lower())
-            score3 = fuzz.token_sort_ratio(col1.lower(), col2.lower())
-            score4 = fuzz.token_set_ratio(col1.lower(), col2.lower())
-            
-            # Take the maximum score
-            max_score = max(score1, score2, score3, score4)
-            
-            # Bonus for exact substring matches
-            if col1.lower() in col2.lower() or col2.lower() in col1.lower():
-                max_score = min(100, max_score + EXACT_MATCH_BONUS)
-            
-            if max_score >= min_score:
-                all_matches.append((col1, col2, max_score, i, j))
-    
-    # Sort by score (descending)
-    all_matches.sort(key=lambda x: x[2], reverse=True)
-    
-    print(f"   Found {len(all_matches)} potential matches above threshold")
-    
-    # Select best non-conflicting matches
-    used_source = set()
-    used_target = set()
-    matched_cols = {}
-    
-    for col1, col2, score, i, j in all_matches:
-        if col1 not in used_source and col2 not in used_target:
-            matched_cols[col1] = col2
-            used_source.add(col1)
-            used_target.add(col2)
-    
-    # Find unmatched columns
-    unmatched_source = [col for col in source_cols if col not in used_source]
-    unmatched_target = [col for col in target_cols if col not in used_target]
-    
-    print(f"\n📊 Matching Results:")
-    print(f"   ✅ Successfully matched: {len(matched_cols)} pairs")
-    print(f"   ❌ Unmatched in source: {len(unmatched_source)}")
-    print(f"   ❌ Unmatched in target: {len(unmatched_target)}")
-    
-    if unmatched_source:
-        print(f"   📝 Unmatched source columns: {unmatched_source}")
-    if unmatched_target:
-        print(f"   📝 Unmatched target columns: {unmatched_target}")
-    
-    return matched_cols, unmatched_source, unmatched_target
+print(f"\n🔍 Starting fuzzy column matching...")
+print(f"   Source columns: {len(sheet1_cols)}")
+print(f"   Target columns: {len(sheet2_cols)}")
 
-# Use the improved matching function
-matched_cols, unmatched_cols, unmatched_sheet2 = find_best_column_matches(sheet1_cols, sheet2_cols)
+matched_cols, unmatched_cols = {}, []
+for col1 in sheet1_cols:
+    match, score = process.extractOne(col1, sheet2_cols)
+    if score >= 90:  # changed the factor by 93 from 90 for better accuracy
+        matched_cols[col1] = match
+        print(f"   ✅ Matched: '{col1}' → '{match}' (score: {score})")
+    else:
+        unmatched_cols.append(col1)
+        print(f"   ❌ No match: '{col1}' (best: '{match}', score: {score})")
+
+# Find unmatched columns in sheet2
+matched_sheet2_cols = set(matched_cols.values())
+unmatched_sheet2 = [col for col in sheet2_cols if col not in matched_sheet2_cols]
+
+print(f"\n📊 Matching Results:")
+print(f"   ✅ Successfully matched: {len(matched_cols)} pairs")
+print(f"   ❌ Unmatched in Sheet1: {len(unmatched_cols)}")
+print(f"   ❌ Unmatched in Sheet2: {len(unmatched_sheet2)}")
+
+if unmatched_cols:
+    print(f"   📝 Unmatched Sheet1 columns: {unmatched_cols}")
+if unmatched_sheet2:
+    print(f"   📝 Unmatched Sheet2 columns: {unmatched_sheet2}")
 
 # === Build Side-by-side Sheet (Common Keys Only) ===
 sheet1_comparison_result = pd.DataFrame(index=sheet1_common.index)
@@ -292,7 +255,7 @@ def are_values_equal_enhanced(v1, v2):
         
         # Handle numeric values
         if isinstance(val, (int, float)):
-            if val == 0 or val == 0.0 or val== 0.00:
+            if val == 0 or val == 0.0 or val== 0.00 :
                 return 0
             return val
         
@@ -368,17 +331,9 @@ column_status_df = pd.DataFrame(column_status)
 # === Column Mapping Sheet ===
 column_comparison_data = []
 for col1, col2 in matched_cols.items(): 
-    # Recalculate the best score for display
-    score1 = fuzz.ratio(col1.lower(), col2.lower())
-    score2 = fuzz.partial_ratio(col1.lower(), col2.lower())
-    score3 = fuzz.token_sort_ratio(col1.lower(), col2.lower())
-    score4 = fuzz.token_set_ratio(col1.lower(), col2.lower())
-    best_score = max(score1, score2, score3, score4)
-    
-    if col1.lower() in col2.lower() or col2.lower() in col1.lower():
-        best_score = min(100, best_score + EXACT_MATCH_BONUS)
-    
-    column_comparison_data.append({'Source_Column': col1, 'Target_Column': col2, 'Match_Status': 'Matched', 'Fuzzy_Score': best_score})
+    # Get the actual score from the matching process
+    _, score = process.extractOne(col1, sheet2_cols)
+    column_comparison_data.append({'Source_Column': col1, 'Target_Column': col2, 'Match_Status': 'Matched', 'Fuzzy_Score': score})
 
 for col1 in unmatched_cols: 
     column_comparison_data.append({'Source_Column': col1, 'Target_Column': 'Not Found', 'Match_Status': 'Missing in Target', 'Fuzzy_Score': 'N/A'})

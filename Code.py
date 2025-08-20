@@ -7,9 +7,9 @@ from openpyxl import load_workbook
 
 
 # === Config ===
-file_path = "/Users/rahulraj/Desktop/sdso4_sap_attribute_headers.xlsx"
-key_columns = [	'Company Code'	 , 'Profit Center' , 	'Billing Document']
-output_file = "/Users/rahulraj/Desktop/sdso4_sap_attribute_final.xlsx"
+file_path = "/Users/rahulraj/Downloads/MMS05_G_N_1440_AO.xlsx"
+key_columns = ['Purchasing Document'    , 'Purchasing Document Item' ,     'Delivery No','Delivery Schedule Line']
+output_file = "/Users/rahulraj/desktop/MMS05_G_N_1440_AO_final.xlsx"
 
 
 
@@ -187,7 +187,7 @@ print(f"   Target columns: {len(sheet2_cols)}")
 matched_cols, unmatched_cols = {}, []
 for col1 in sheet1_cols:
     match, score = process.extractOne(col1, sheet2_cols)
-    if score >= 90:  # changed the factor by 93 from 90 for better accuracy
+    if score >= 92:  # changed the factor by 93 from 90 for better accuracy
         matched_cols[col1] = match
         print(f"   ✅ Matched: '{col1}' → '{match}' (score: {score})")
     else:

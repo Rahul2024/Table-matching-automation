@@ -7,9 +7,9 @@ from openpyxl import load_workbook
 
 
 # === Config ===
-file_path = "/Users/rahulraj/Downloads/MMS05_G_N_1440_AO.xlsx"
-key_columns = ['Purchasing Document'    , 'Purchasing Document Item' ,     'Delivery No','Delivery Schedule Line']
-output_file = "/Users/rahulraj/desktop/MMS05_G_N_1440_AO_final.xlsx"
+file_path = "/Users/rahulraj/Downloads/Book 39.xlsx"
+key_columns = ['Company Code' ,'Profit Center' , 'Billing Document']
+output_file = "/Users/rahulraj/desktop/SDS04_agrregate_testing_5385_27AUG.xlsx"
 
 
 
@@ -251,21 +251,21 @@ def are_values_equal_enhanced(v1, v2):
     def normalize_value(val):
         """Normalize a value to a standard form for comparison."""
         if pd.isna(val) or val is None:
-            return None
+            return 0  # Treat NaN/None as equivalent to 0
         
         # Handle numeric values
         if isinstance(val, (int, float)):
-            if val == 0 or val == 0.0 or val== 0.00 :
+            if val == 0 or val == 0.0 or val == 0.00:
                 return 0
             return val
         
         # Handle string values
         if isinstance(val, str):
-            cleaned = val.strip().lower()
+            cleaned = val.strip()
             
-            # Check for various empty representations
-            if cleaned in ['', '0', '0.00','0.0', '#', 'nan', 'null', 'none', 'not assigned', '-']:
-                return None
+            # Check for various empty representations - treat them as equivalent to 0
+            if cleaned in ['', '0', '0.00', '0.0', 'nan', 'null', 'none', 'Not assigned', '-', '*', '#',' ']:
+                return 0
             
             # Try to convert to number if it looks like one
             try:
@@ -277,9 +277,9 @@ def are_values_equal_enhanced(v1, v2):
                 return cleaned
         
         # Try to convert other types to string and normalize
-        str_val = str(val).strip().lower()
-        if str_val in ['', '0', '0.00'  , '0.0', 'nan', 'null', 'none', 'not assigned', '-']:
-            return None
+        str_val = str(val).strip()
+        if str_val in ['', '0', '0.00', '0.0', 'nan', 'null', 'none', 'Not assigned', '-', '*','#', ' ']:
+            return 0
         
         try:
             num_val = float(str_val)
@@ -294,12 +294,8 @@ def are_values_equal_enhanced(v1, v2):
     norm_v2 = normalize_value(v2)
     
     # Compare normalized values
-    if norm_v1 is None and norm_v2 is None:
-        return True
-    if norm_v1 is None or norm_v2 is None:
-        return False
     if norm_v1 == 0 and norm_v2 == 0:
-        return True
+        return True  # Both are zero/equivalent (including NaN, None, empty strings, etc.)
     
     return norm_v1 == norm_v2
 
